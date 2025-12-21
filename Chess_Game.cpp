@@ -2,6 +2,7 @@
 #include <iostream>
 #include<string>
 #include<optional>
+#include <ctime>
 #include <unordered_map>
 #include "chess_board.h"
 
@@ -65,6 +66,8 @@ private:
     Chess_Board board;
 
 public:
+    std::timespec time_last_click;
+    std::unordered_map<std::string, sf::Texture> textures;
     std::optional<Coordinates> getClickedCell(sf::RenderWindow& window, int cellSize)
     {
         sf::Event event;
@@ -86,6 +89,16 @@ public:
 
         return std::nullopt;
     }
+    bool can_click() {
+        std::timespec time_now;
+        std::timespec_get(&time_now, TIME_UTC);
+
+        // Преобразуем в наносекунды (секунды * 1e9 + наносекунды)
+        long long current_click = static_cast<long long>(time_now.tv_sec) * 1000000000LL + time_now.tv_nsec;
+        long long last_click = static_cast<long long>(this->time_last_click.tv_sec) * 1000000000LL + this->time_last_click.tv_nsec;
+        // Проверяем прошло ли достаточно времени с последнего клика
+        return (current_click - last_click) >= 45000;
+    }
 
     void draw_board(sf::RenderWindow& window) {
         const int windowSize = 640;
@@ -102,10 +115,6 @@ public:
                 std::cerr << "Warning: cannot load font assets/DejaVuSans.ttf\n";
             }
         }
-
-
-        auto& textures = getTextures();
-
 
         sf::RectangleShape square(sf::Vector2f(tileSize, tileSize));
 
@@ -208,15 +217,21 @@ public:
         this->current_player = Color::White;
         this->first_click = true;
         this->mate = false;
+        this->time_last_click.tv_sec = 0;
+        this->textures = getTextures();
         this->cords_white_king = Coordinates(0, 4);
         this->cords_black_king = Coordinates(7, 4);
 
         board.set_default_placement();
 
         sf::RenderWindow window(sf::VideoMode(640, 640), L"Шахматы", sf::Style::Default);
-        window.setFramerateLimit(3);
+        window.setFramerateLimit(5);
 
         while (window.isOpen()) {
+            if (!can_click()){
+                continue;
+            }
+            std::timespec_get(&this->time_last_click, TIME_UTC);
             if (mate) {
                 draw_board(window);
             }
@@ -227,7 +242,7 @@ public:
 
                 if (event.type == sf::Event::Closed) window.close();
 
-                if (first_click) {
+                if (first_click){
                     std::vector<Coordinates> possible_moves;
 
                     auto cords_click_1 = getClickedCell(window, 80);
