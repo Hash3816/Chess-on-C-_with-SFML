@@ -1,9 +1,7 @@
 #include <SFML/Graphics.hpp>
 #include <windows.h>
 #include <iostream>
-#include<string>
 #include<optional>
-#include <ctime>
 #include <unordered_map>
 #include "chess_board.h"
 
@@ -67,44 +65,25 @@ public:
     std::unordered_map<std::string, sf::Texture> textures;
 
 
-    std::optional<Coordinates> getClickedCell(sf::RenderWindow& window, int cellSize)
+    std::optional<Coordinates> getClickedCell(sf::Event& event, sf::Window& window, int cellSize)
     {
-        sf::Event event;
+      auto cords_click_mouse_x = event.mouseButton.x;
+      auto cords_click_mouse_y = event.mouseButton.y;
 
-        while (window.pollEvent(event))
-        {
-            if (event.key.code == sf::Mouse::Left) {
-                auto cords_click_mouse_x = event.mouseButton.x;
-                auto cords_click_mouse_y = event.mouseButton.y;
+      int x = cords_click_mouse_x / cellSize;
+      int y = (640 - cords_click_mouse_y) / cellSize;
 
-                int x = cords_click_mouse_x / cellSize;
-                int y = (640 - cords_click_mouse_y) / cellSize;
+      while (window.pollEvent(event)) { //Отчистка буфера событий
 
-                if (x >= 0 && x < 8 && y >= 0 && y < 8)
-                    while (window.pollEvent(event)) { //Отчистка буфера событий
+      }
 
-                    }
-
-                    return Coordinates(y, x);
-
-            }
-        }
+      if (x >= 0 && x < 8 && y >= 0 && y < 8) {
+          return Coordinates(y, x);
+      }
 
         return std::nullopt;
     }
-    bool can_click() {
-        //Проверка промежутка времени между текущем событием и прошлым
-        //если прошло достаточно времени, то обрабатываем событие
 
-        std::timespec time_now;
-        std::timespec_get(&time_now, TIME_UTC);
-
-        // Преобразуем в наносекунды (секунды * 1e9 + наносекунды)
-        long long current_click = static_cast<long long>(time_now.tv_sec) * 1000000000LL + time_now.tv_nsec;
-        long long last_click = static_cast<long long>(this->time_last_click.tv_sec) * 1000000000LL + this->time_last_click.tv_nsec;
-        // Проверяем прошло ли достаточно времени с последнего клика
-        return (current_click - last_click) >= 50000000;
-    }
 
     void draw_board(sf::RenderWindow& window, sf::Event &event) {
         const int windowSize = 640;
@@ -223,30 +202,26 @@ public:
 
 
             while (window.pollEvent(event)) { // Обработка пула событий
+                if (event.type == sf::Event::Closed) window.close();
 
-                if (!can_click()) { // Если прошло недостаточно времени между событиями, то выходим из обработки
-                    clear_events(window);
-                    break;
+                if (event.key.code != sf::Mouse::Button::Left) {
+                    continue;
                 }
-
-                std::timespec_get(&this->time_last_click, TIME_UTC); // Сохраняем время последнего обработанного события
+                
 
                 if (this->board.mate) {
                     draw_board(window, event);
-                    clear_events(window);
                     break;
                 }
-
-                if (event.type == sf::Event::Closed) window.close();
 
                 if (first_click){
                     std::vector<Coordinates> possible_moves;
 
-                    auto cords_click_1 = getClickedCell(window, 80);
+                    auto cords_click_1 = getClickedCell(event, window, 80);
 
 
                     if (!cords_click_1.has_value()) { // Клика не было
-                        break;
+                        continue;
                     }
 
                     // Отрисовка ходов (1 клик)
@@ -273,15 +248,19 @@ public:
                         this->rendering_coordinates = possible_moves;
                         this->first_click = false;
                         this->cords_select_piece = Coordinates(cords_click_1->y, cords_click_1->x);
-                        break;
+                        continue;
                     }
 
                 }
                 if (!first_click) {
-                    auto cord_click_2 = getClickedCell(window, 80);
+                    auto cord_click_2 = getClickedCell(event, window, 80);
 
                     if (!cord_click_2.has_value()) { // Клика не было
-                        break;
+                        continue;
+                    }
+
+                    if ((cord_click_2->x == cords_select_piece.x) && (cord_click_2->y == cords_select_piece.y)) {
+                        continue;
                     }
 
                     if (is_valid_move(cord_click_2)) {
@@ -364,11 +343,6 @@ public:
         this->rendering_coordinates.clear();
     }
     
-    void clear_events(sf::Window& window) {
-        sf::Event event;
-        while (window.pollEvent(event)) {}
-    };
-
     bool is_valid_move(std::optional<Coordinates> cord_2_click) {
         if (cord_2_click.has_value()) {
             for (auto possible_cord : this->rendering_coordinates) {
