@@ -1,6 +1,6 @@
 #pragma once
 #include <memory>
-#include "piece.h"    
+#include "virtual_piece.h"    
 
 class Cell {
 private:

@@ -1,4 +1,5 @@
 #include <SFML/Graphics.hpp>
+#include <windows.h>
 #include <iostream>
 #include<string>
 #include<optional>
@@ -52,13 +53,9 @@ static std::unordered_map<std::string, sf::Texture>& getTextures() {
 
 class Game {
 private:
-    Color current_player;
-
-    Coordinates cords_white_king;
-    Coordinates cords_black_king;
+    Color color_current_player;
 
     bool first_click;
-    bool mate;
 
     Coordinates cords_select_piece;
     std::vector<Coordinates> rendering_coordinates;
@@ -68,6 +65,8 @@ private:
 public:
     std::timespec time_last_click;
     std::unordered_map<std::string, sf::Texture> textures;
+
+
     std::optional<Coordinates> getClickedCell(sf::RenderWindow& window, int cellSize)
     {
         sf::Event event;
@@ -82,6 +81,10 @@ public:
                 int y = (640 - cords_click_mouse_y) / cellSize;
 
                 if (x >= 0 && x < 8 && y >= 0 && y < 8)
+                    while (window.pollEvent(event)) { //Отчистка буфера событий
+
+                    }
+
                     return Coordinates(y, x);
 
             }
@@ -90,6 +93,9 @@ public:
         return std::nullopt;
     }
     bool can_click() {
+        //Проверка промежутка времени между текущем событием и прошлым
+        //если прошло достаточно времени, то обрабатываем событие
+
         std::timespec time_now;
         std::timespec_get(&time_now, TIME_UTC);
 
@@ -97,29 +103,18 @@ public:
         long long current_click = static_cast<long long>(time_now.tv_sec) * 1000000000LL + time_now.tv_nsec;
         long long last_click = static_cast<long long>(this->time_last_click.tv_sec) * 1000000000LL + this->time_last_click.tv_nsec;
         // Проверяем прошло ли достаточно времени с последнего клика
-        return (current_click - last_click) >= 45000;
+        return (current_click - last_click) >= 50000000;
     }
 
-    void draw_board(sf::RenderWindow& window) {
+    void draw_board(sf::RenderWindow& window, sf::Event &event) {
         const int windowSize = 640;
         const int tiles = 8;
         const float tileSize = static_cast<float>(windowSize) / tiles;
 
-
         static sf::Font font;
-        static bool fontLoaded = false;
-        if (!fontLoaded) {
-            fontLoaded = font.loadFromFile("assets/DejaVuSans.ttf"); // положите шрифт в assets или укажите свой путь
-            if (!fontLoaded) {
-                // Если шрифт не загружен — можно вывести в cerr и продолжить (будет пустой текст)
-                std::cerr << "Warning: cannot load font assets/DejaVuSans.ttf\n";
-            }
-        }
+        font.loadFromFile("assets/DejaVuSans.ttf");
 
         sf::RectangleShape square(sf::Vector2f(tileSize, tileSize));
-
-
-        sf::Sprite sprite;
 
         for (int y = 0; y < tiles; ++y) {
             for (int x = 0; x < tiles; ++x) {
@@ -153,6 +148,8 @@ public:
                     auto it = textures.find(key);
                     if (it != textures.end()) {
                         const sf::Texture& tex = it->second;
+
+                        sf::Sprite sprite;
                         sprite.setTexture(tex, true);
 
                         sf::Vector2u texSize = tex.getSize();
@@ -175,19 +172,10 @@ public:
             }
         }
 
-        sf::Event event;
-        window.pollEvent(event);
-        if (event.key.code == sf::Keyboard::R) {
-            Chess_Board new_board;
-            board.clear();
-            window.clear();
-            window.close();
-            start_Game();
-        }
+        
+        if (this->board.mate) {
 
-        if (this->mate) {
-
-            Color winner = (this->current_player == Color::White) ? Color::Black : Color::White;
+            Color winner = (this->color_current_player == Color::White) ? Color::Black : Color::White;
             std::string winnerText = (winner == Color::White) ? "White wins!\nPress R to restart" : "Black wins!\nPress R to restart";
 
             sf::RectangleShape overlay(sf::Vector2f(static_cast<float>(windowSize) * 0.8f, static_cast<float>(windowSize) * 0.3f));
@@ -209,36 +197,45 @@ public:
 
             window.draw(overlay);
             window.draw(text);
+
+            if (event.key.code == sf::Keyboard::R) {
+                board.set_default();
+                window.clear();
+                window.close();
+
+                start_Game();
+            }
         }
     }
 
 
     void start_Game() {
-        this->current_player = Color::White;
+        this->color_current_player = Color::White;
         this->first_click = true;
-        this->mate = false;
         this->time_last_click.tv_sec = 0;
         this->textures = getTextures();
-        this->cords_white_king = Coordinates(0, 4);
-        this->cords_black_king = Coordinates(7, 4);
-
-        board.set_default_placement();
 
         sf::RenderWindow window(sf::VideoMode(640, 640), L"Шахматы", sf::Style::Default);
         window.setFramerateLimit(5);
 
         while (window.isOpen()) {
-            if (!can_click()){
-                continue;
-            }
-            std::timespec_get(&this->time_last_click, TIME_UTC);
-            if (mate) {
-                draw_board(window);
-            }
-
             sf::Event event;
 
-            while (window.pollEvent(event)) {
+
+            while (window.pollEvent(event)) { // Обработка пула событий
+
+                if (!can_click()) { // Если прошло недостаточно времени между событиями, то выходим из обработки
+                    clear_events(window);
+                    break;
+                }
+
+                std::timespec_get(&this->time_last_click, TIME_UTC); // Сохраняем время последнего обработанного события
+
+                if (this->board.mate) {
+                    draw_board(window, event);
+                    clear_events(window);
+                    break;
+                }
 
                 if (event.type == sf::Event::Closed) window.close();
 
@@ -255,7 +252,7 @@ public:
                     // Отрисовка ходов (1 клик)
                     Cell& cell = this->board.matrix_pieces[cords_click_1->y][cords_click_1->x];
 
-                    if (!cell.is_empty && (cell.piece->get_color_piece() == current_player)) {
+                    if (!cell.is_empty && (cell.piece->get_color_piece() == color_current_player)) {
                         possible_moves = board.matrix_pieces[cords_click_1->y][cords_click_1->x].piece->get_possible_moves(board);
 
                         for (Coordinates possible_cord : possible_moves) {
@@ -283,10 +280,7 @@ public:
                 if (!first_click) {
                     auto cord_click_2 = getClickedCell(window, 80);
 
-                    while (!cord_click_2.has_value() && window.pollEvent(event)) { // Ожидание ввода
-                        cord_click_2 = getClickedCell(window, 80);
-                    }
-                    if (!window.pollEvent(event)) {
+                    if (!cord_click_2.has_value()) { // Клика не было
                         break;
                     }
 
@@ -302,7 +296,7 @@ public:
                     }
                 }
             }
-            draw_board(window);
+            draw_board(window, event);
             window.display();
         }
     };
@@ -313,10 +307,10 @@ public:
         if (board.matrix_pieces[this->cords_select_piece.y][this->cords_select_piece.x].piece->get_type() == Piece_Type::King) {
 
             if (board.matrix_pieces[cords_select_piece.y][cords_select_piece.x].piece->get_color_piece() == Color::White) {
-                this->cords_white_king = Coordinates(cord_move->y, cord_move->x);
+                this->board.cords_white_king = Coordinates(cord_move->y, cord_move->x);
             }
             else {
-                this->cords_black_king = Coordinates(cord_move->y, cord_move->x);
+                this->board.cords_black_king = Coordinates(cord_move->y, cord_move->x);
             }
         }
 
@@ -342,29 +336,21 @@ public:
             board.matrix_pieces[cord_move->y][cord_move->x].set_piece(type_piece, color);
         }
 
-        if (is_check()) { // Если игрок походил но при этом его король всё ещё находится под шахом, то он проиграл
-            this->mate = true;
+        if (board.is_check(this->color_current_player)) { // Если игрок походил но при этом его король всё ещё находится под шахом, то он проиграл
+            board.mate = true;
             return;
         }
         // Смена игрока
         this->change_player();
         this->first_click = true;
     }
-    bool is_check();
-
-    void clear_input_stack(sf::RenderWindow& window) {
-        sf::Event event;
-        while (window.pollEvent(event)) {
-            //Отчистка стека
-        }
-    }
 
     void change_player() {
-        if (current_player == Color::White) {
-            current_player = Color::Black;
+        if (color_current_player == Color::White) {
+            color_current_player = Color::Black;
         }
         else {
-            current_player = Color::White;
+            color_current_player = Color::White;
         }
     }
 
@@ -377,6 +363,11 @@ public:
 
         this->rendering_coordinates.clear();
     }
+    
+    void clear_events(sf::Window& window) {
+        sf::Event event;
+        while (window.pollEvent(event)) {}
+    };
 
     bool is_valid_move(std::optional<Coordinates> cord_2_click) {
         if (cord_2_click.has_value()) {
@@ -391,339 +382,12 @@ public:
     }
 };
 
-bool Game::is_check() { // Проверка на шах
-    Coordinates cords_king;
-
-    if (current_player == Color::White) {
-        cords_king = cords_white_king;
-    }
-    else {
-        cords_king = cords_black_king;
-    }
-
-    Cell& cell_king = board.matrix_pieces[cords_king.y][cords_king.x];
-
-    // Проверка всех направлений откуда может быть шах
-    int x = cords_king.x;
-    int y = cords_king.y;
-
-    while (y + 1 <= 7) {// Спереди
-        y++;
-
-        if (this->board.matrix_pieces[y][x].is_empty) {
-
-            continue;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() == cell_king.piece->get_color_piece()) {
-
-            break;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() != cell_king.piece->get_color_piece()) {
-
-            std::vector<Coordinates> cords_move_enemy = this->board.matrix_pieces[y][x].piece->get_possible_moves(board);
-
-            for (auto cord_move_enemy : cords_move_enemy) {
-
-                if ((cord_move_enemy.x == cords_king.x) && (cord_move_enemy.y == cords_king.y)) {
-
-                    return true;
-                }
-            }
-            break;
-        }
-    }
-    y = cords_king.y;
-
-    while (y - 1 >= 0) {
-        y--;
-
-        if (this->board.matrix_pieces[y][x].is_empty) {
-            continue;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() == cell_king.piece->get_color_piece()) {
-
-            break;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() != cell_king.piece->get_color_piece()) {
-
-            std::vector<Coordinates> cords_move_enemy = this->board.matrix_pieces[y][x].piece->get_possible_moves(board);
-
-            for (auto cord_move_enemy : cords_move_enemy) {
-
-                if ((cord_move_enemy.x == cords_king.x) && (cord_move_enemy.y == cords_king.y)) {
-                    return true;
-                }
-            }
-            break;
-        }
-    }
-
-    y = cords_king.y;
-
-    while (x - 1 >= 0) {
-        x--;
-
-        if (this->board.matrix_pieces[y][x].is_empty) {
-            continue;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() == cell_king.piece->get_color_piece()) {
-            break;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() != cell_king.piece->get_color_piece()) {
-
-            std::vector<Coordinates> cords_move_enemy = this->board.matrix_pieces[y][x].piece->get_possible_moves(board);
-
-            for (auto cord_move_enemy : cords_move_enemy) {
-
-                if ((cord_move_enemy.x == cords_king.x) && (cord_move_enemy.y == cords_king.y)) {
-                    return true;
-                }
-            }
-            break;
-        }
-
-    }
-
-    x = cords_king.x;
-
-    while (x + 1 <= 7) {
-        x++;
-
-        if (this->board.matrix_pieces[y][x].is_empty) {
-            continue;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() == cell_king.piece->get_color_piece()) {
-            break;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() != cell_king.piece->get_color_piece()) {
-
-            std::vector<Coordinates> cords_move_enemy = this->board.matrix_pieces[y][x].piece->get_possible_moves(board);
-
-            for (auto cord_move_enemy : cords_move_enemy) {
-
-                if ((cord_move_enemy.x == cords_king.x) && (cord_move_enemy.y == cords_king.y)) {
-                    return true;
-                }
-            }
-            break;
-        }
-
-    }
-
-    x = cords_king.x;
-
-    while (x - 1 >= 0 && y + 1 <= 7) {
-        x--;
-        y++;
-
-        if (this->board.matrix_pieces[y][x].is_empty) {
-            continue;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() == cell_king.piece->get_color_piece()) {
-            break;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() != cell_king.piece->get_color_piece()) {
-
-            std::vector<Coordinates> cords_move_enemy = this->board.matrix_pieces[y][x].piece->get_possible_moves(board);
-
-            for (auto cord_move_enemy : cords_move_enemy) {
-
-                if ((cord_move_enemy.x == cords_king.x) && (cord_move_enemy.y == cords_king.y)) {
-                    return true;
-                }
-            }
-            break;
-        }
-    }
-
-    x = cords_king.x;
-    y = cords_king.y;
-
-    while (x + 1 <= 7 && y + 1 <= 7) { // Правая верхняя диагональ
-        x++;
-        y++;
-
-        if (this->board.matrix_pieces[y][x].is_empty) {
-            continue;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() == cell_king.piece->get_color_piece()) {
-            break;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() != cell_king.piece->get_color_piece()) {
-
-            std::vector<Coordinates> cords_move_enemy = this->board.matrix_pieces[y][x].piece->get_possible_moves(board);
-
-            for (auto cord_move_enemy : cords_move_enemy) {
-
-                if ((cord_move_enemy.x == cords_king.x) && (cord_move_enemy.y == cords_king.y)) {
-                    return true;
-                }
-            }
-            break;
-        }
-    }
-
-    x = cords_king.x;
-    y = cords_king.y;
-
-    while (x + 1 <= 7 && y - 1 >= 0) { // Правая нижняя диагональ
-        x++;
-        y--;
-
-        if (this->board.matrix_pieces[y][x].is_empty) {
-            continue;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() == cell_king.piece->get_color_piece()) {
-            break;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() != cell_king.piece->get_color_piece()) {
-
-            std::vector<Coordinates> cords_move_enemy = this->board.matrix_pieces[y][x].piece->get_possible_moves(board);
-
-            for (auto cord_move_enemy : cords_move_enemy) {
-
-                if ((cord_move_enemy.x == cords_king.x) && (cord_move_enemy.y == cords_king.y)) {
-                    return true;
-                }
-            }
-            break;
-        }
-    }
-
-    x = cords_king.x;
-    y = cords_king.y;
-
-    while (x - 1 >= 0 && y - 1 >= 0) { // Левая нижняя диагональ
-        x--;
-        y--;
-
-        if (this->board.matrix_pieces[y][x].is_empty) {
-            continue;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() == cell_king.piece->get_color_piece()) {
-            break;
-        }
-
-        else if (this->board.matrix_pieces[y][x].piece->get_color_piece() != cell_king.piece->get_color_piece()) {
-
-            std::vector<Coordinates> cords_move_enemy = this->board.matrix_pieces[y][x].piece->get_possible_moves(board);
-
-            for (auto cord_move_enemy : cords_move_enemy) {
-
-                if ((cord_move_enemy.x == cords_king.x) && (cord_move_enemy.y == cords_king.y)) {
-                    return true;
-                }
-            }
-            break;
-        }
-    }
-
-    x = cords_king.x;
-    y = cords_king.y;
-
-
-    if (cords_king.y + 2 <= 7 && cords_king.x - 1 >= 0) {
-        if (this->board.matrix_pieces[cords_king.y + 2][cords_king.x - 1].is_empty) {
-            //Ничего
-        }
-        else if(this->board.matrix_pieces[cords_king.y + 2][cords_king.x - 1].piece->get_color_piece() != cell_king.piece->get_color_piece()
-            && this->board.matrix_pieces[cords_king.y + 2][cords_king.x - 1].piece->get_type() == Piece_Type::Knight) {
-            return true;
-        }
-    }
-
-    if (cords_king.y + 2 <= 7 && cords_king.x + 1 <= 7) {
-        if (this->board.matrix_pieces[cords_king.y + 2][cords_king.x + 1].is_empty) {
-            //Ничего
-        }
-        else if (this->board.matrix_pieces[cords_king.y + 2][cords_king.x + 1].piece->get_color_piece() != cell_king.piece->get_color_piece()
-            && this->board.matrix_pieces[cords_king.y + 2][cords_king.x + 1].piece->get_type() == Piece_Type::Knight) {
-            return true;
-        }
-    }
-
-
-    if (cords_king.y - 2 >= 0 && cords_king.x - 1 >= 0) {
-        if (this->board.matrix_pieces[cords_king.y - 2][cords_king.x - 1].is_empty) {
-            //Ничего
-        }
-        else if (this->board.matrix_pieces[cords_king.y - 2][cords_king.x - 1].piece->get_color_piece() != cell_king.piece->get_color_piece()
-            && this->board.matrix_pieces[cords_king.y - 2][cords_king.x - 1].piece->get_type() == Piece_Type::Knight) {
-            return true;
-        }
-    }
-
-    if (cords_king.y - 2 >= 0 && cords_king.x + 1 <= 7) {
-        if (this->board.matrix_pieces[cords_king.y - 2][cords_king.x + 1].is_empty) {
-            //Ничего
-        }
-        else if (this->board.matrix_pieces[cords_king.y - 2][cords_king.x + 1].piece->get_color_piece() != cell_king.piece->get_color_piece()
-            && this->board.matrix_pieces[cords_king.y - 2][cords_king.x + 1].piece->get_type() == Piece_Type::Knight) {
-            return true;
-        }
-    }
-
-    if (cords_king.y + 1 <= 7 && cords_king.x + 2 <= 7) {
-        if (this->board.matrix_pieces[cords_king.y + 1][cords_king.x + 2].is_empty) {
-            //Ничего
-        }
-        else if (this->board.matrix_pieces[cords_king.y + 1][cords_king.x + 2].piece->get_color_piece() != cell_king.piece->get_color_piece()
-            && this->board.matrix_pieces[cords_king.y + 1][cords_king.x + 2].piece->get_type() == Piece_Type::Knight) {
-            return true;
-        }
-    }
-
-    if (cords_king.y + 1 <= 7 && cords_king.x - 2 >= 0) {
-        if (this->board.matrix_pieces[cords_king.y + 1][cords_king.x - 2].is_empty) {
-            //Ничего
-        }
-        else if (this->board.matrix_pieces[cords_king.y + 1][cords_king.x - 2].piece->get_color_piece() != cell_king.piece->get_color_piece()
-            && this->board.matrix_pieces[cords_king.y + 1][cords_king.x - 2].piece->get_type() == Piece_Type::Knight) {
-            return true;
-        }
-    }
-
-    if (cords_king.y - 1 >= 0 && cords_king.x - 2 >= 0) {
-        if (this->board.matrix_pieces[cords_king.y - 1][cords_king.x - 2].is_empty) {
-            //Ничего
-        }
-        else if (this->board.matrix_pieces[cords_king.y - 1][cords_king.x - 2].piece->get_color_piece() != cell_king.piece->get_color_piece()
-            && this->board.matrix_pieces[cords_king.y - 1][cords_king.x - 2].piece->get_type() == Piece_Type::Knight) {
-            return true;
-        }
-    }
-
-    if (cords_king.y - 1 >= 0 && cords_king.x + 2 <= 7) {
-        if (this->board.matrix_pieces[cords_king.y - 1][cords_king.x + 2].is_empty) {
-            //Ничего
-        }
-        else if (this->board.matrix_pieces[cords_king.y - 1][cords_king.x + 2].piece->get_color_piece() != cell_king.piece->get_color_piece()
-            && this->board.matrix_pieces[cords_king.y - 1][cords_king.x + 2].piece->get_type() == Piece_Type::Knight) {
-            return true;
-        }
-    }
-
-    return false; // Шах не найден
-}
-
 
 int main()
 {
+    HWND hConsole = GetConsoleWindow();//Если компилятор старый заменить на GetForegroundWindow()
+    ShowWindow(hConsole, SW_HIDE);//собственно прячем оконо консоли
+
     Game chess_game;
     chess_game.start_Game();
 }
