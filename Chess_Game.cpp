@@ -203,7 +203,7 @@ public:
         this->time_last_click.tv_sec = 0;
         this->textures = getTextures();
 
-        sf::RenderWindow window(sf::VideoMode(640, 640), L"Шахматы", sf::Style::Default);
+        sf::RenderWindow window(sf::VideoMode(640, 640), L"Шахматы", sf::Style::Titlebar | sf::Style::Close);
         window.setFramerateLimit(60);
 
         while (window.isOpen()) {
